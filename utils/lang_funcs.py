@@ -6,54 +6,108 @@ from langchain.docstore.document import Document
 import textwrap
 import pandas as pd
 import re
+from langdetect import detect
 
 def preprocess_text(text):
     if pd.isna(text):
         return ""
-    text = str(text).lower()
-    text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
-    return text.strip()
+    text = str(text).strip()
+    return text
 
+def detect_query_language(query):
+    try:
+        return detect(query)
+    except:
+        return 'en'  # default to English if detection fails
+
+def format_property_info(row, language='en'):
+    title = row.get('title', '')
+    property_type = row.get('property_type', '')
+    address = row.get('address', '')
+    city = row.get('city', '')
+    area = row.get('area', '')
+    bedroom = row.get('bedroom', '')
+    bathroom = row.get('bathroom', '')
+    guest_number = row.get('guest_number', '')
+    price_info = str(row.get('price_info', ''))
+    
+    # Format property type with quotes
+    property_type_str = f"'{property_type}'" if property_type else ''
+    
+    if language == 'id':
+        # Convert price to Rupiah for Indonesian
+        price_match = re.search(r'\$([\d,.]+)', price_info)
+        if price_match:
+            price_usd = float(price_match.group(1).replace(',', ''))
+            price_idr = f"Rp{price_usd * 16846:,.0f}"  # 1 USD = 16,846 IDR
+            
+            # Determine price period
+            if "per month" in price_info.lower() or "per bulan" in price_info.lower():
+                price_period = "per bulan"
+            elif "per night" in price_info.lower() or "per malam" in price_info.lower():
+                price_period = "per malam"
+            elif "2 nights" in price_info.lower() or "2 malam" in price_info.lower():
+                price_period = "untuk 2 malam"
+            else:
+                price_period = "per malam"  # default to per night
+                
+            price_info = f"Harga mulai dari {price_idr} {price_period}"
+        else:
+            price_info = f"Informasi harga: {price_info}"
+        
+        return (f"{title} adalah sebuah {property_type_str} yang berlokasi di {area}, {city}. "
+                f"Alamat lengkapnya: {address}. "
+                f"Properti ini memiliki {bedroom} kamar tidur, {bathroom} kamar mandi, "
+                f"dan dapat menampung hingga {guest_number} tamu. {price_info}")
+    else:
+        # English version remains the same
+        return (f"{title} is a {property_type_str} located in {area}, {city}. "
+                f"Full address: {address}. "
+                f"This property has {bedroom} bedrooms, {bathroom} bathrooms, "
+                f"and can accommodate up to {guest_number} guests. {price_info}")
+    
 def load_data(file_path=None, df=None):
     if df is None:
         df = pd.read_excel(file_path)
     
     required_columns = [
-        'title', 'address', 'property_id', 'bedroom', 
-        'bathroom', 'property_type', 'property_status', 
-        'guest number', 'city', 'area'
+        'title', 'property_type', 'address', 'city', 
+        'area', 'bedroom', 'bathroom', 'guest_number', 
+        'price_info'
     ]
     
+    # Filter to only include required columns
     available_columns = [col for col in required_columns if col in df.columns]
     df = df[available_columns]
     
-    text_columns = ['title', 'address', 'property_type', 'property_status', 'city', 'area']
-    for col in text_columns:
-        if col in df.columns:
-            df[col] = df[col].apply(preprocess_text)
-    
-    df['combined_text'] = df.apply(lambda row: ' '.join(
-        str(row[col]) for col in available_columns if col in row
-    ), axis=1)
-    
+    # Create documents for each property in both languages
     documents = []
     for _, row in df.iterrows():
         metadata = {
-            'property_id': str(row.get('property_id', '')),
+            'title': str(row.get('title', '')),
+            'property_type': str(row.get('property_type', '')),
+            'address': str(row.get('address', '')),
+            'city': str(row.get('city', '')),
+            'area': str(row.get('area', '')),
             'bedroom': str(row.get('bedroom', '')),
             'bathroom': str(row.get('bathroom', '')),
-            'guest_number': str(row.get('guest number', ''))
+            'guest_number': str(row.get('guest_number', '')),
+            'price_info': str(row.get('price_info', ''))
         }
         
-        for field in text_columns:
-            if field in row:
-                metadata[field] = row[field]
-        
-        doc = Document(
-            page_content=row['combined_text'],
-            metadata=metadata
+        # Create English version
+        doc_en = Document(
+            page_content=format_property_info(row, 'en'),
+            metadata={**metadata, 'language': 'en'}
         )
-        documents.append(doc)
+        documents.append(doc_en)
+        
+        # Create Indonesian version
+        doc_id = Document(
+            page_content=format_property_info(row, 'id'),
+            metadata={**metadata, 'language': 'id'}
+        )
+        documents.append(doc_id)
     
     return documents
 
