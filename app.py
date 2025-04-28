@@ -111,7 +111,7 @@ def format_property_response(property_data):
 def initialize_system():
     try:
         # Load data langsung dari file lokal
-        file_path = r"C:\Users\IqbalKaldera\OneDrive\Documents\Dibimbing\RAG\data_bukit_vista.xlsx"
+        file_path = 'data_bukit_vista.xlxs'
         df = pd.read_excel(file_path)
         
         if df is None:
